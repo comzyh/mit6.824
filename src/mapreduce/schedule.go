@@ -38,27 +38,6 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		ntasks = nReduce
 		nOther = len(mapFiles)
 	}
-
-	wg.Add(ntasks)
-	for index := 0; index < ntasks; index++ {
-		filename := ""
-		if phase == mapPhase {
-			filename = mapFiles[index]
-		}
-		go func(index int, filename string) {
-			mapper := <-registerChan
-			call(mapper, "Worker.DoTask", DoTaskArgs{
-				JobName:       jobName,
-				File:          filename,
-				Phase:         phase,
-				TaskNumber:    index,
-				NumOtherPhase: nOther,
-			}, nil)
-			wg.Done()
-			registerChan <- mapper
-		}(index, filename)
-	}
-	wg.Wait()
 	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, nOther)
 
 	// All ntasks tasks have to be scheduled on workers, and only once all of
@@ -68,5 +47,30 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 	//
+	wg.Add(ntasks)
+	for index := 0; index < ntasks; index++ {
+		filename := ""
+		if phase == mapPhase {
+			filename = mapFiles[index]
+		}
+		go func(index int, filename string) {
+			ok := false
+			for !ok {
+				mapper := <-registerChan
+				ok = call(mapper, "Worker.DoTask", DoTaskArgs{
+					JobName:       jobName,
+					File:          filename,
+					Phase:         phase,
+					TaskNumber:    index,
+					NumOtherPhase: nOther,
+				}, nil)
+				go func() {
+					registerChan <- mapper
+				}()
+			}
+			wg.Done()
+		}(index, filename)
+	}
+	wg.Wait()
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
